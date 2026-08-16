@@ -84,18 +84,23 @@ try {
     Assert-True ($buildOutput -contains 'Addon input rules: 10') 'addon input rule count was not reported'
     Assert-True ($buildOutput -contains 'Addon unique rules: 9') 'addon unique rule count was not reported'
     Assert-True ($buildOutput -contains 'Addon added rules: 3') 'addon added rule count was not reported'
+    Assert-True (@($buildOutput | Where-Object { $_ -like 'Strict: *sr_top500_whitelist_ad_dns_strict.conf' }).Count -eq 1) 'strict output path was not reported'
 
     $fullPath = Join-Path $temporaryDirectory 'sr_top500_whitelist_ad_dns_balanced.conf'
     $extensionPath = Join-Path $temporaryDirectory 'sr_top500_dns_balanced_extension.conf'
+    $strictPath = Join-Path $temporaryDirectory 'sr_top500_whitelist_ad_dns_strict.conf'
     Assert-True (Test-Path -LiteralPath $fullPath -PathType Leaf) 'complete config was not created'
     Assert-True (Test-Path -LiteralPath $extensionPath -PathType Leaf) 'extension config was not created'
+    Assert-True (Test-Path -LiteralPath $strictPath -PathType Leaf) 'strict config was not created'
 
     $utf8 = New-Object System.Text.UTF8Encoding($false)
     $source = [System.IO.File]::ReadAllText($fixture, $utf8)
     $full = [System.IO.File]::ReadAllText($fullPath, $utf8)
     $extension = [System.IO.File]::ReadAllText($extensionPath, $utf8)
+    $strict = [System.IO.File]::ReadAllText($strictPath, $utf8)
 
     Assert-Equal (Get-RuleTail $source) (Remove-ManagedAddonBlock (Get-RuleTail $full)) 'source rule tail changed outside managed addon block'
+    Assert-Equal (Get-RuleTail $full) (Get-RuleTail $strict) 'strict profile changed split-routing rules'
     Assert-True ((Get-RuleTail $full).StartsWith("[Rule]`n$addonBeginMarker`n", [System.StringComparison]::Ordinal)) 'managed addon block is not first in Rule'
     Assert-True (@($full -split [regex]::Escape($addonBeginMarker)).Count -eq 2) 'managed addon begin marker count is not one'
     Assert-True (@($full -split [regex]::Escape($addonEndMarker)).Count -eq 2) 'managed addon end marker count is not one'
@@ -127,6 +132,7 @@ try {
 
     $fullGeneralLines = @(Get-SectionBody $full '[General]')
     $extensionGeneralLines = @(Get-SectionBody $extension '[General]')
+    $strictGeneralLines = @(Get-SectionBody $strict '[General]')
     $fullHostLines = @(Get-SectionBody $full '[Host]')
     Assert-True ($fullHostLines -ccontains 'dns-server = 192.0.2.53') 'managed-looking key outside General was changed'
 
@@ -147,6 +153,36 @@ try {
         Assert-True ($fullGeneralLines -ccontains $line) "complete General section lacks: $line"
         Assert-True ($extensionGeneralLines -ccontains $line) "extension General section lacks: $line"
     }
+
+    $strictRequired = @(
+        'ipv6 = false',
+        'prefer-ipv6 = false',
+        'dns-server = https://1.1.1.1/dns-query#proxy',
+        'fallback-dns-server = https://8.8.8.8/dns-query#proxy',
+        'proxy-dns-server = https://223.5.5.5/dns-query#no-h3, https://223.6.6.6/dns-query#no-h3',
+        'dns-direct-system = false',
+        'dns-direct-fallback-proxy = true',
+        'private-ip-answer = true',
+        'udp-policy-not-supported-behaviour = REJECT',
+        'block-quic = always-allow',
+        'hijack-dns = 8.8.8.8:53, 8.8.4.4:53, 1.1.1.1:53, 1.0.0.1:53, 9.9.9.9:53, 149.112.112.112:53, 208.67.222.222:53, 208.67.220.220:53, 223.5.5.5:53, 223.6.6.6:53, 119.29.29.29:53, 182.254.116.116:53, 114.114.114.114:53, 114.114.115.115:53'
+    )
+    foreach ($line in $strictRequired) {
+        Assert-True ($strictGeneralLines -ccontains $line) "strict General section lacks: $line"
+    }
+
+    $activeStrictGeneralLines = $strictGeneralLines | Where-Object { $_ -notmatch '^\s*#' }
+    foreach ($key in @('ipv6', 'prefer-ipv6', 'dns-server', 'fallback-dns-server', 'proxy-dns-server', 'dns-direct-system', 'dns-direct-fallback-proxy', 'private-ip-answer', 'udp-policy-not-supported-behaviour', 'block-quic', 'hijack-dns')) {
+        $count = @($activeStrictGeneralLines | Where-Object { $_ -match ("^\s*" + [regex]::Escape($key) + "\s*=") }).Count
+        Assert-True ($count -eq 1) "strict managed key '$key' occurs $count times in General"
+    }
+    foreach ($key in @('bypass-system', 'bypass-tun', 'tun-excluded-routes')) {
+        $count = @($activeStrictGeneralLines | Where-Object { $_ -match ("^\s*" + [regex]::Escape($key) + "\s*=") }).Count
+        Assert-True ($count -eq 0) "strict General retained bypass key '$key'"
+    }
+    Assert-True (-not $strict.Contains('fallback-dns-server = system')) 'strict profile can fall back to system DNS'
+    Assert-True (-not $strict.Contains('direct-dns-server')) 'strict profile contains beta-only direct-dns-server'
+    Assert-True (-not $strict.Contains('always-ip-address')) 'strict profile forces local resolution'
 
     $activeFullGeneralLines = $fullGeneralLines | Where-Object { $_ -notmatch '^\s*#' }
     foreach ($key in @('ipv6', 'prefer-ipv6', 'dns-server', 'fallback-dns-server', 'dns-direct-system', 'dns-direct-fallback-proxy', 'private-ip-answer', 'udp-policy-not-supported-behaviour', 'block-quic', 'hijack-dns')) {
@@ -201,10 +237,13 @@ try {
     [System.IO.Directory]::CreateDirectory($secondDirectory) | Out-Null
     & $builder -SourcePath $fullPath -AddonSourcePath $addonFixture -OutputDirectory $secondDirectory -MinimumRuleCount 6 -MinimumAddonRuleCount 9 | Out-Null
     $secondFullPath = Join-Path $secondDirectory 'sr_top500_whitelist_ad_dns_balanced.conf'
+    $secondStrictPath = Join-Path $secondDirectory 'sr_top500_whitelist_ad_dns_strict.conf'
     $secondFull = [System.IO.File]::ReadAllText($secondFullPath, $utf8)
+    $secondStrict = [System.IO.File]::ReadAllText($secondStrictPath, $utf8)
     Assert-Equal $full $secondFull 'repeated build was not idempotent'
+    Assert-Equal $strict $secondStrict 'repeated strict build was not idempotent'
 
-    foreach ($path in @($fullPath, $extensionPath, $secondFullPath)) {
+    foreach ($path in @($fullPath, $extensionPath, $strictPath, $secondFullPath, $secondStrictPath)) {
         $bytes = [System.IO.File]::ReadAllBytes($path)
         $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
         Assert-True (-not $hasBom) "$path contains a UTF-8 BOM"

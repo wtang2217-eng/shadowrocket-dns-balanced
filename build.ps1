@@ -244,11 +244,13 @@ foreach ($rule in $addedRules) {
 $addonManagedLines.Add($addonEndMarker)
 
 $managedHeader = '# Daily performance + DNS leak protection (Shadowrocket stable)'
+$strictManagedHeader = '# Strict tunnel DNS + maximum QUIC performance (Shadowrocket 2.2.90+)'
 $managedKeys = @(
     'ipv6',
     'prefer-ipv6',
     'dns-server',
     'fallback-dns-server',
+    'proxy-dns-server',
     'dns-direct-system',
     'dns-direct-fallback-proxy',
     'private-ip-answer',
@@ -270,6 +272,20 @@ $managedLines = @(
     'hijack-dns = 8.8.8.8:53, 8.8.4.4:53, 1.1.1.1:53, 1.0.0.1:53, 9.9.9.9:53, 149.112.112.112:53, 223.5.5.5:53, 223.6.6.6:53, 119.29.29.29:53, 182.254.116.116:53, 114.114.114.114:53, 114.114.115.115:53'
 )
 
+$strictManagedLines = @(
+    'ipv6 = false',
+    'prefer-ipv6 = false',
+    'dns-server = https://1.1.1.1/dns-query#proxy',
+    'fallback-dns-server = https://8.8.8.8/dns-query#proxy',
+    'proxy-dns-server = https://223.5.5.5/dns-query#no-h3, https://223.6.6.6/dns-query#no-h3',
+    'dns-direct-system = false',
+    'dns-direct-fallback-proxy = true',
+    'private-ip-answer = true',
+    'udp-policy-not-supported-behaviour = REJECT',
+    'block-quic = always-allow',
+    'hijack-dns = 8.8.8.8:53, 8.8.4.4:53, 1.1.1.1:53, 1.0.0.1:53, 9.9.9.9:53, 149.112.112.112:53, 208.67.222.222:53, 208.67.220.220:53, 223.5.5.5:53, 223.6.6.6:53, 119.29.29.29:53, 182.254.116.116:53, 114.114.114.114:53, 114.114.115.115:53'
+)
+
 $generalEndIndex = $ruleIndex
 for ($index = $generalIndex + 1; $index -lt $ruleIndex; $index++) {
     if ($lines[$index] -match '^\s*\[[^]]+\]\s*$') {
@@ -281,7 +297,7 @@ for ($index = $generalIndex + 1; $index -lt $ruleIndex; $index++) {
 $prefix = New-Object System.Collections.Generic.List[string]
 for ($index = 0; $index -lt $generalEndIndex; $index++) {
     $line = $lines[$index]
-    if ($index -gt $generalIndex -and ($line.Trim() -ceq $managedHeader -or $line.Trim() -ceq '# Balanced DNS leak protection (Shadowrocket only)')) {
+    if ($index -gt $generalIndex -and ($line.Trim() -ceq $managedHeader -or $line.Trim() -ceq $strictManagedHeader -or $line.Trim() -ceq '# Balanced DNS leak protection (Shadowrocket only)')) {
         continue
     }
     if ($index -gt $generalIndex -and $line -match '^\s*([A-Za-z0-9-]+)\s*=') {
@@ -325,13 +341,59 @@ $extensionLines = @(
 ) + $managedLines
 $extensionText = (($extensionLines -join "`n").TrimEnd("`n")) + "`n"
 
+$strictLines = @($fullLines)
+$strictGeneralIndex = [Array]::IndexOf($strictLines, '[General]')
+$strictRuleIndex = [Array]::IndexOf($strictLines, '[Rule]')
+if ($strictGeneralIndex -lt 0 -or $strictRuleIndex -lt 0 -or $strictGeneralIndex -ge $strictRuleIndex) {
+    throw 'Generated balanced configuration must contain [General] before [Rule].'
+}
+
+$strictGeneralEndIndex = $strictRuleIndex
+for ($index = $strictGeneralIndex + 1; $index -lt $strictRuleIndex; $index++) {
+    if ($strictLines[$index] -match '^\s*\[[^]]+\]\s*$') {
+        $strictGeneralEndIndex = $index
+        break
+    }
+}
+
+$strictPrefix = New-Object System.Collections.Generic.List[string]
+for ($index = 0; $index -lt $strictGeneralEndIndex; $index++) {
+    $line = $strictLines[$index]
+    if ($index -gt $strictGeneralIndex -and ($line.Trim() -ceq $managedHeader -or $line.Trim() -ceq $strictManagedHeader -or $line.Trim() -ceq '# Balanced DNS leak protection (Shadowrocket only)')) {
+        continue
+    }
+    if ($index -gt $strictGeneralIndex -and $line -match '^\s*([A-Za-z0-9-]+)\s*=') {
+        $key = $Matches[1].ToLowerInvariant()
+        if ($managedKeys -contains $key -or $key -eq 'bypass-system' -or $key -eq 'bypass-tun' -or $key -eq 'tun-excluded-routes') { continue }
+    }
+    $strictPrefix.Add($line)
+}
+
+while ($strictPrefix.Count -gt 0 -and [string]::IsNullOrWhiteSpace($strictPrefix[$strictPrefix.Count - 1])) {
+    $strictPrefix.RemoveAt($strictPrefix.Count - 1)
+}
+
+$strictPrefix.Add('')
+$strictPrefix.Add($strictManagedHeader)
+foreach ($line in $strictManagedLines) { $strictPrefix.Add($line) }
+$strictPrefix.Add('')
+
+for ($index = $strictGeneralEndIndex; $index -lt $strictRuleIndex; $index++) {
+    $strictPrefix.Add($strictLines[$index])
+}
+
+$strictFullLines = @($strictPrefix) + @($strictLines[$strictRuleIndex..($strictLines.Count - 1)])
+$strictFullText = $strictFullLines -join "`n"
+
 $resolvedOutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 [System.IO.Directory]::CreateDirectory($resolvedOutputDirectory) | Out-Null
 $fullOutputPath = Join-Path $resolvedOutputDirectory 'sr_top500_whitelist_ad_dns_balanced.conf'
 $extensionOutputPath = Join-Path $resolvedOutputDirectory 'sr_top500_dns_balanced_extension.conf'
+$strictOutputPath = Join-Path $resolvedOutputDirectory 'sr_top500_whitelist_ad_dns_strict.conf'
 
 [System.IO.File]::WriteAllText($fullOutputPath, $fullText, $utf8)
 [System.IO.File]::WriteAllText($extensionOutputPath, $extensionText, $utf8)
+[System.IO.File]::WriteAllText($strictOutputPath, $strictFullText, $utf8)
 
 Write-Output "Source: $sourceDescription"
 Write-Output "Rules: $ruleCount"
@@ -341,3 +403,4 @@ Write-Output "Addon unique rules: $($addonRules.Count)"
 Write-Output "Addon added rules: $($addedRules.Count)"
 Write-Output "Complete: $fullOutputPath"
 Write-Output "Extension: $extensionOutputPath"
+Write-Output "Strict: $strictOutputPath"
