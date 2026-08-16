@@ -139,7 +139,7 @@ try {
         'dns-direct-fallback-proxy = true',
         'private-ip-answer = true',
         'udp-policy-not-supported-behaviour = REJECT',
-        'block-quic = all-proxy',
+        'block-quic = always-allow',
         'hijack-dns = 8.8.8.8:53, 8.8.4.4:53, 1.1.1.1:53, 1.0.0.1:53, 9.9.9.9:53, 149.112.112.112:53, 223.5.5.5:53, 223.6.6.6:53, 119.29.29.29:53, 182.254.116.116:53, 114.114.114.114:53, 114.114.115.115:53'
     )
 
@@ -156,6 +156,7 @@ try {
 
     Assert-True ($extension.Contains('include = minimal-upstream.conf')) 'extension does not inherit the source filename'
     Assert-True (-not $full.Contains('fallback-dns-server = system')) 'system fallback remains active'
+    Assert-True (-not $full.Contains('block-quic = all-proxy')) 'proxied QUIC remains blocked'
     Assert-True (-not $full.Contains('hijack-dns = :53')) 'global port-53 hijack was introduced'
     Assert-True (-not $full.Contains('always-real-ip = *')) 'always-real-ip wildcard was introduced'
     Assert-True (-not $full.Contains('always-ip-address')) 'always-ip-address was introduced'
