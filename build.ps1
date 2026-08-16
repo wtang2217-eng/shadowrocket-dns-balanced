@@ -251,6 +251,8 @@ $managedKeys = @(
     'dns-server',
     'fallback-dns-server',
     'proxy-dns-server',
+    'direct-dns-server',
+    'dns-fallback-system',
     'dns-direct-system',
     'dns-direct-fallback-proxy',
     'private-ip-answer',
@@ -383,6 +385,18 @@ for ($index = $strictGeneralEndIndex; $index -lt $strictRuleIndex; $index++) {
 }
 
 $strictFullLines = @($strictPrefix) + @($strictLines[$strictRuleIndex..($strictLines.Count - 1)])
+$strictSanitizedLines = New-Object System.Collections.Generic.List[string]
+$strictSection = ''
+foreach ($line in $strictFullLines) {
+    if ($line -match '^\s*\[([^]]+)\]\s*$') {
+        $strictSection = $Matches[1].Trim().ToLowerInvariant()
+    }
+    if ($strictSection -eq 'host' -and $line -match '^\s*[^#;].*=\s*server:system(?:\s*(?:#.*)?)?$') {
+        continue
+    }
+    $strictSanitizedLines.Add($line)
+}
+$strictFullLines = @($strictSanitizedLines)
 $strictFullText = $strictFullLines -join "`n"
 
 $resolvedOutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
