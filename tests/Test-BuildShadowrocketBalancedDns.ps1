@@ -182,6 +182,8 @@ try {
     }
     Assert-True (-not $strict.Contains('fallback-dns-server = system')) 'strict profile can fall back to system DNS'
     Assert-True (-not $strict.Contains('direct-dns-server')) 'strict profile contains beta-only direct-dns-server'
+    Assert-True (-not $strict.Contains('dns-fallback-system')) 'strict profile contains legacy system fallback control'
+    Assert-True (-not $strict.Contains('server:system')) 'strict profile contains a Host system resolver override'
     Assert-True (-not $strict.Contains('always-ip-address')) 'strict profile forces local resolution'
 
     $activeFullGeneralLines = $fullGeneralLines | Where-Object { $_ -notmatch '^\s*#' }
@@ -197,7 +199,9 @@ try {
     Assert-True (-not $full.Contains('always-real-ip = *')) 'always-real-ip wildcard was introduced'
     Assert-True (-not $full.Contains('always-ip-address')) 'always-ip-address was introduced'
     Assert-True (-not $full.Contains('direct-dns-server')) 'beta-only direct-dns-server was introduced'
+    Assert-True (-not $full.Contains('dns-fallback-system')) 'legacy system fallback control was introduced'
     Assert-True (-not $full.Contains('proxy-dns-server')) 'unverified proxy-dns-server was introduced'
+    Assert-True ($full.Contains('system.example = server:system')) 'balanced profile unexpectedly removed the Host system resolver fixture'
 
     $minimumRuleGuardTriggered = $false
     try {
