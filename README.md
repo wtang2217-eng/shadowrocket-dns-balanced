@@ -1,6 +1,6 @@
-# Shadowrocket 日常高性能 + DNS 防泄漏配置
+# Shadowrocket 日常高性能 + 加密分流 DNS 配置
 
-这是一份可直接导入 Shadowrocket 的完整规则配置，基于 Johnshall 的 `sr_top500_whitelist_ad.conf`，补充稳定版可用的 DNS 防泄漏与日常性能参数。配置不含代理节点、订阅令牌或任何账号凭据。
+这是一份可直接导入 Shadowrocket 的完整规则配置，基于 Johnshall 的 `sr_top500_whitelist_ad.conf`，补充稳定版可用的加密分流 DNS 与日常性能参数。它不是“所有 DNS 都跟随代理”的严格隐私配置。配置不含代理节点、订阅令牌或任何账号凭据。
 
 ## 直接导入
 
@@ -17,7 +17,7 @@ https://raw.githubusercontent.com/wtang2217-eng/shadowrocket-dns-balanced/main/s
 - `dns-direct-system = false`，DIRECT 规则也不借用系统 DNS。
 - `dns-direct-fallback-proxy = true`，直连解析失败时通过代理重试，提高弱网可用性。
 - `hijack-dns` 只拦截常见公共 DNS 的 53 端口，不全局劫持局域网 DNS，兼顾 NAS、公司网络和认证门户。
-- `block-quic = all-proxy` 只阻断代理应用流量的 QUIC，减少 UDP/443 旁路和不稳定回退；DIRECT 流量仍可使用 QUIC。
+- `block-quic = always-allow` 保留代理连接的 QUIC/HTTP/3，避免上传被强制回落到 TCP；需在 Shadowrocket 的设置、订阅和节点三处开启 UDP 转发。
 - 默认关闭 IPv6，避免节点或网络未完整支持双栈时出现绕行与泄漏。
 - 节点不支持 UDP 时直接拒绝，不让流量意外改道。
 - 每次构建静态合并 AWAvenue `Only.Ads` 小型纯广告列表，并对 Johnshall 已有拒绝规则去重；不在手机端叠加大型远程广告集合。
@@ -55,10 +55,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -OutputDirec
 
 节点延迟测试建议使用 `CONNECT` 方法；自动测速间隔可设为 600 秒、超时 5 秒、容差 50–100 ms，避免节点在微小延迟波动时频繁跳换。配置本身不包含节点，节点仍由你在 Shadowrocket 中单独添加或订阅。
 
-如果某个应用必须使用代理侧 QUIC/UDP 443 且出现异常，可把 `block-quic` 临时改为 `always-allow` 对照测试；日常均衡默认保留 `all-proxy`。
+日常均衡默认允许 QUIC。若节点不支持 UDP，配置仍会按 `udp-policy-not-supported-behaviour = REJECT` 拒绝 UDP，避免真实流量意外直连；此时应换用支持 UDP 的节点，而不是把回退改成 `DIRECT`。
 
 ## 安全边界
 
+- 这是“日常均衡”的分流 DNS：DIRECT 域名使用本地加密 AliDNS/DNSPod，PROXY 域名由代理端解析。检测站显示 AliDNS、DNSPod、Cloudflare 或代理机房递归器并不等于运营商明文 DNS 泄漏，也不保证 DNS 与代理出口同地。
 - `hijack-dns` 能接管硬编码的传统 UDP/TCP 53 查询，但不能普遍拦截应用自己实现的 DoH、DoT 或 DoQ。
 - Shadowrocket 断开或 VPN 切换窗口不受本配置保护。
 - DIRECT 网站仍能看到设备的真实出口 IP；DNS 防泄漏不等于所有流量匿名。
