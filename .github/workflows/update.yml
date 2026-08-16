@@ -78,8 +78,18 @@ jobs:
           )) {
               if (-not $strict.Contains($required)) { throw "Strict config lacks required content: $required" }
           }
-          foreach ($forbidden in @('fallback-dns-server = system', 'bypass-system =', 'bypass-tun =', 'tun-excluded-routes =', 'always-ip-address =')) {
-              if ($strict.Contains($forbidden)) { throw "Strict config contains forbidden content: $forbidden" }
+          $activeStrictLines = @($strict -split "`r?`n" | Where-Object { $_ -notmatch '^\s*[#;]' })
+          foreach ($forbiddenKey in @('bypass-system', 'bypass-tun', 'tun-excluded-routes', 'direct-dns-server', 'dns-fallback-system', 'always-ip-address')) {
+              $forbiddenCount = @($activeStrictLines | Where-Object {
+                  $_ -match ("^\s*" + [regex]::Escape($forbiddenKey) + "\s*=")
+              }).Count
+              if ($forbiddenCount -ne 0) { throw "Strict config contains forbidden key: $forbiddenKey" }
+          }
+          if (@($activeStrictLines | Where-Object { $_ -match '^\s*(?:dns-server|fallback-dns-server)\s*=\s*system(?:\s*(?:#.*)?)?$' }).Count -ne 0) {
+              throw 'Strict config contains an active system DNS resolver.'
+          }
+          if (@($activeStrictLines | Where-Object { $_ -match '=\s*server:system(?:\s*(?:#.*)?)?$' }).Count -ne 0) {
+              throw 'Strict config contains a Host system resolver override.'
           }
 
           if ((Get-Item -LiteralPath $fullPath).Length -lt 1000000) {
