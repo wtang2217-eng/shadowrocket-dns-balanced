@@ -1,0 +1,87 @@
+name: Refresh Shadowrocket configuration
+
+on:
+  schedule:
+    - cron: '20 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: shadowrocket-dns-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Test builder
+        shell: powershell
+        run: .\tests\Test-BuildShadowrocketBalancedDns.ps1
+
+      - name: Rebuild from official sources
+        shell: powershell
+        run: .\build.ps1 -OutputDirectory . -MinimumRuleCount 50000 -MinimumAddonRuleCount 500
+
+      - name: Validate generated files
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $utf8 = New-Object System.Text.UTF8Encoding($false, $true)
+          $fullPath = Join-Path $PWD 'sr_top500_whitelist_ad_dns_balanced.conf'
+          $extensionPath = Join-Path $PWD 'sr_top500_dns_balanced_extension.conf'
+
+          foreach ($path in @($fullPath, $extensionPath)) {
+              if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+                  throw "Missing generated file: $path"
+              }
+              $bytes = [System.IO.File]::ReadAllBytes($path)
+              $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+              if ($hasBom) { throw "UTF-8 BOM detected: $path" }
+              [void]$utf8.GetString($bytes)
+          }
+
+          $full = [System.IO.File]::ReadAllText($fullPath, $utf8)
+          foreach ($required in @(
+              '[General]',
+              '[Rule]',
+              'fallback-dns-server = https://223.5.5.5/dns-query#no-h3, https://1.1.1.1/dns-query#no-h3',
+              'dns-direct-system = false',
+              'block-quic = all-proxy',
+              '# BEGIN CODEX MANAGED AWAvenue Only.Ads',
+              '# END CODEX MANAGED AWAvenue Only.Ads'
+          )) {
+              if (-not $full.Contains($required)) { throw "Missing required content: $required" }
+          }
+          if ($full.Contains('fallback-dns-server = system')) {
+              throw 'System DNS fallback was introduced.'
+          }
+          if ((Get-Item -LiteralPath $fullPath).Length -lt 1000000) {
+              throw 'Complete configuration is unexpectedly small.'
+          }
+
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Commit refreshed outputs
+        shell: powershell
+        run: |
+          git add -- sr_top500_whitelist_ad_dns_balanced.conf sr_top500_dns_balanced_extension.conf
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) {
+              Write-Host 'No upstream change.'
+              exit 0
+          }
+          if ($LASTEXITCODE -ne 1) { exit $LASTEXITCODE }
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore: refresh upstream rules'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git push origin HEAD:main

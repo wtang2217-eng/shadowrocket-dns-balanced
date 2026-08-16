@@ -1,0 +1,13 @@
+# AWAvenue Only.Ads style fixture
+# Comments and blank lines are allowed.
+
+DOMAIN,ads.example
+DOMAIN,sub.ads.example
+DOMAIN,exact.example
+DOMAIN-SUFFIX,parent.example
+DOMAIN-SUFFIX,child.parent.example
+DOMAIN,unique.example
+DOMAIN-SUFFIX,newads.example
+DOMAIN,sub.newads.example
+DOMAIN-KEYWORD,-ad-unit
+DOMAIN,UNIQUE.EXAMPLE
